@@ -1,0 +1,16 @@
+{
+  "<sample_id_1>": {
+    "path": "<path_to_fastq_dir>/<sample_id_1>",
+    "groups": [
+      "<group_name_1>",
+      "<group_name_2>"
+    ]
+  },
+  "<sample_id_2>": {
+    "path": "<path_to_fastq_dir>/<sample_id_2>",
+    "groups": [
+      "<group_name_2>",
+      "<group_name_3>"
+    ]
+  }
+}
