@@ -1,7 +1,7 @@
 ## NEXT-scASV
 
 ### Abstract
-NEXT-scASV (Nextflow pipeline for Allele-Specific Variant calling), a scalable Nextflow pipeline for calling allele-specific variants (ASVs) from 5′ single-cell RNA sequencing data. NEXT-scASV integrates established tools for alignment (HISAT2), reads deduplication  (umi_tools), variant calling (bcftools mpileup), reference bias correction (WASP), and advanced statistical modeling (MIXALIME). The pipeline consists of five main subflows, illustrated in Figure 1: (i) Data Splitting, (ii) Alignment and Filtering, (iii) Variant Calling, (iv) Allelic Read Counting, and (v) ASV Calling. 
+NEXT-scASV (Nextflow pipeline for Allele-Specific Variant calling), a scalable Nextflow pipeline for calling allele-specific variants (ASVs) from 5′ single-cell RNA sequencing data. NEXT-scASV integrates established tools for alignment (HISAT2), reads deduplication  (umi_tools), variant calling (bcftools mpileup), reference bias correction (WASP), and advanced statistical modeling (MIXALIME). The pipeline consists of five main subflows: (i) Data Splitting, (ii) Alignment and Filtering, (iii) Variant Calling, (iv) Allelic Read Counting, and (v) ASV Calling. 
 
 <div align="center">
 <img src="scheme.png" alt="Pipeline scheme" width="50%" />
