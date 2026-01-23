@@ -4,10 +4,10 @@ process PROCESS_BAM {
     debug true  // Add debug output
 
     input:
-        tuple val(sample_name), path(bam)
+        tuple val(sample_name), val(sample_id), path(bam)
 
     output:
-        tuple val(sample_name), path("${sample_name}_marked_filtered.bam"), path("${sample_name}_marked_filtered.bam.bai")
+        tuple val(sample_name), val(sample_id), path("${sample_name}_marked_filtered.bam"), path("${sample_name}_marked_filtered.bam.bai")
 
     script:
     """

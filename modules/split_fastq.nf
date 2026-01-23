@@ -10,7 +10,7 @@ process SPLIT_FASTQ {
         val(output_dir)
 
     output:
-        tuple path("${sample_id}-${group}*.R1.fastq"), path("${sample_id}-${group}*.R2.fastq")
+        tuple val(sample_id), val(group), path("${sample_id}-${group}*.R1.fastq"), path("${sample_id}-${group}*.R2.fastq")
 
     script:
     """

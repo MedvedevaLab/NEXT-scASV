@@ -49,6 +49,7 @@ workflow SPLIT_WORKFLOW {
         sample_group_ch = Channel.fromList(sampleGroups)
         
         // Run the splitting process for each sample/group combination
+        // SPLIT_FASTQ output: [sample_id, group, r1_fastq, r2_fastq]
         split_results = SPLIT_FASTQ(
             sample_group_ch,
             input_dir,
@@ -56,13 +57,9 @@ workflow SPLIT_WORKFLOW {
         )
         
         // Transform output to structured format for downstream workflows
-        structured_output = split_results.map { r1_fastq, r2_fastq ->
-            // Extract sample info from filename
-            def sample_name = r1_fastq.baseName.toString().replaceAll(/\.R1$/, '')
-            def parts = sample_name.split('-')
-            def sample_id = parts[0]
-            def group = parts[1]
-            
+        structured_output = split_results.map { sample_id, group, r1_fastq, r2_fastq ->
+            // Avoid parsing sample_id/group from filenames; sample_id may itself contain '-'
+            def sample_name = "${sample_id}-${group}"
             [sample_name, sample_id, group, r1_fastq, r2_fastq]
         }
     

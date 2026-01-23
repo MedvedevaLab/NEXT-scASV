@@ -71,6 +71,8 @@ Modify `nextflow.config` in the project root. Key parameters (see `nextflow_dev.
 
 - **Calling/Filtering**
   - `params.min_GQ`, `params.min_DP`, `params.min_AD`: genotype quality/depth thresholds.
+  - `params.variant_caller`: variant calling backend for the CALL step (`bcftools` or `cellsnp`).
+    - For `cellsnp`, the pipeline runs **cellsnp-lite Mode 2b** per chromosome (no `-R`, no `-b`, `--cellTAG None --UMItag None`) and uses `params.6` / `params.cellsnp_minCOUNT`.
 
 - **Count/ASE**
   - `params.h5_files_b`: optional H5 directory (set `null` to generate from scratch).
@@ -89,7 +91,7 @@ Modify `nextflow.config` in the project root. Key parameters (see `nextflow_dev.
 
 ### 4) Run
 
-From the project root:
+6
 ```bash
 ./bin/nextflow run main.nf -c nextflow.config
 ```

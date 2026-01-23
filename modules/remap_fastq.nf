@@ -7,7 +7,7 @@ process REMAP_FASTQ {
         tuple val(sample_name), val(sample_id), path(r1_fastq), path(r2_fastq), val(out_path)
 
     output:
-        tuple path("*_dedup_with_tag.bam"), path("*_dedup_with_tag.bam.bai")
+        tuple val(sample_name), val(sample_id), path("${sample_name}_dedup_with_tag.bam"), path("${sample_name}_dedup_with_tag.bam.bai")
 
     script:
     // def (base_name, group_name) = sample_name.split('\\+')

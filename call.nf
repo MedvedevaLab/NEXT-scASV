@@ -4,6 +4,7 @@ nextflow.enable.dsl = 2
 
 // Import processes
 include { CALL_VARIANTS } from './modules/call_variants'
+include { CALL_VARIANTS_CELLSNP } from './modules/call_variants_cellsnp'
 include { MERGE_VARIANTS } from './modules/merge_variants'
 include { FILTER_VARIANTS } from './modules/filter_variants'
 
@@ -59,7 +60,7 @@ workflow CALL_WORKFLOW {
                     return output
                 }
                 .splitCsv(sep: '\t', header: false)
-                .map { sample_id, group ->
+                .map { sample_id, pat_id, group ->
                     def cmd = "python3 ${projectDir}/bin/meta_parser.py create_sample_name '${sample_id}' '${group}'"
                     def sample_name = cmd.execute().text.trim().replaceAll("'", '')
                     def bam_file = file("${input_source}/${sample_name}_marked_filtered.bam")
@@ -71,7 +72,8 @@ workflow CALL_WORKFLOW {
                         return null
                     }
                     
-                    [sample_name, sample_id, bam_file, bai_file]
+                    // Use pat_id downstream
+                    tuple(sample_name, pat_id.toString(), bam_file, bai_file)
                 }
                 .filter { it != null }
                 .set { filtered_bams }
@@ -81,10 +83,9 @@ workflow CALL_WORKFLOW {
             log.info "Running CALL_WORKFLOW in chained mode with input channel"
             
             input_source
-                .map { sample_name, bam_file, bai_file ->
-                    // Extract sample_id from sample_name (assuming format like "sample_id+group")
-                    def sample_id = sample_name.split('\\-')[0]
-                    [sample_name, sample_id, bam_file, bai_file]
+                .map { sample_name, sample_id, bam_file, bai_file ->
+                    // Chained mode must provide pat_id as the 2nd element
+                    tuple(sample_name, sample_id.toString(), bam_file, bai_file)
                 }
                 .set { filtered_bams }
         }
@@ -94,13 +95,60 @@ workflow CALL_WORKFLOW {
             .splitCsv(header:true, sep:'\t')
             .map { row -> row.chroms }
 
-        // Collect all BAM files for variant calling
+        // Collect BAM paths (bcftools caller only needs BAMs)
         all_bams = filtered_bams
-            .map { sample_name, sample_id, bam, bai -> bam }
+            .map { sample_name, pat_id, bam, bai -> bam }
             .collect()
+
+        // Early sanity check: make failures actionable (e.g. if something like 'R' sneaks in)
+        all_bams_checked = all_bams.map { bams ->
+            if( !(bams instanceof List) )
+                error "CALL_WORKFLOW expected a List of BAM paths, but got ${bams?.getClass()?.name}: ${bams}"
+            def bad = bams.findAll { x ->
+                !(x instanceof java.nio.file.Path) && !(x instanceof File)
+            }
+            if( bad && bad.size() > 0 )
+                error "CALL_WORKFLOW got non-path values in BAM list (showing up to 10): ${bad.take(10)}"
+            return bams
+        }
         
         // Call variants for each chromosome
-        variants = CALL_VARIANTS(chrom_ch, all_bams)
+        if (params.variant_caller == 'cellsnp') {
+            log.info "Calling variants with cellsnp-lite (Mode 2b) per chromosome"
+
+            // For cellsnp-lite (-S/-i), we must keep BAMs and sample IDs in the exact same order.
+            bam_id_pairs = filtered_bams
+                .map { sample_name, pat_id, bam, bai -> tuple(pat_id.toString(), bam) }
+                .collect()
+
+            sorted_bam_id_pairs = bam_id_pairs
+                .map { pairs ->
+                    return pairs.toList().sort { a, b -> a[0].toString() <=> b[0].toString() }
+                }
+
+            all_bams_cellsnp = sorted_bam_id_pairs
+                .map { pairs -> pairs.collect { it[1] } }
+
+            all_sample_ids = sorted_bam_id_pairs
+                .map { pairs -> pairs.collect { it[0].toString() } }
+
+            // Also validate the derived list
+            all_bams_cellsnp_checked = all_bams_cellsnp.map { bams ->
+                if( !(bams instanceof List) )
+                    error "CALL_WORKFLOW expected a List of BAM paths for cellsnp-lite, but got ${bams?.getClass()?.name}: ${bams}"
+                def bad = bams.findAll { x ->
+                    !(x instanceof java.nio.file.Path) && !(x instanceof File)
+                }
+                if( bad && bad.size() > 0 )
+                    error "CALL_WORKFLOW got non-path values in cellsnp BAM list (showing up to 10): ${bad.take(10)}"
+                return bams
+            }
+
+            variants = CALL_VARIANTS_CELLSNP(chrom_ch, all_bams_cellsnp_checked, all_sample_ids)
+        } else {
+            log.info "Calling variants with bcftools mpileup/call per chromosome"
+            variants = CALL_VARIANTS(chrom_ch, all_bams_checked)
+        }
         
         // Collect variants for merging
         variants_to_merge = variants.collect()
@@ -110,7 +158,7 @@ workflow CALL_WORKFLOW {
 
         // Prepare input for FILTER_VARIANTS
         sample_ids = filtered_bams
-            .map { sample_name, sample_id, bam, bai -> sample_id }
+            .map { sample_name, pat_id, bam, bai -> pat_id.toString() }
             .unique()
 
         filter_input = sample_ids

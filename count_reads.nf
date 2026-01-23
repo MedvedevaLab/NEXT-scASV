@@ -84,13 +84,12 @@ workflow COUNT_READS_WORKFLOW {
             log.info "Running COUNT_READS_WORKFLOW with both inputs from channels"
             
             // Combine processed BAMs with called results
-            // bams_source: [sample_name, bam_file, bai_file]
+            // bams_source: [sample_name, sample_id, bam_file, bai_file]
             // called_source: [sample_id, bed_file, tbi_file] from FILTER_VARIANTS
             
             // Transform BAM channel to have sample_id as key for joining
             bam_keyed = bams_source
-                .map { sample_name, bam_file, bai_file ->
-                    def sample_id = sample_name.split('\\-')[0]
+                .map { sample_name, sample_id, bam_file, bai_file ->
                     [sample_id, sample_name, bam_file, bai_file]
                 }
             
