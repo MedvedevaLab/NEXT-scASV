@@ -33,10 +33,13 @@ workflow SPLIT_WORKFLOW {
         
         // Skip header and process each line
         splitTableContent.tokenize('\n')
-                        .findAll { it.trim() && !it.startsWith('barcode') } // Skip header and empty lines
+                        .findAll { it.trim() && !it.trim().startsWith('barcode') } // Skip header and empty lines
                         .collect { line ->
-                            def fields = line.split('\t')
-                            if (fields.size() >= 3) {
+                            def fields = line.trim().split('\t')
+                            if (fields.size() >= 4) {
+                                // Handle tables with a leading index column
+                                [fields[2], fields[3]] // [sample_id, group]
+                            } else if (fields.size() >= 3) {
                                 [fields[1], fields[2]] // [sample_id, group]
                             }
                         }

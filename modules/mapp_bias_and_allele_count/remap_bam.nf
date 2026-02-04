@@ -25,7 +25,7 @@ process REMAP_BAMFILES {
         --samples ${pat_id} \
         sorted.bam
 
-    ${projectDir}/bin/hisat2/hisat2 --very-sensitive -p ${task.cpus} --seed 13 \
+    hisat2 --very-sensitive -p ${task.cpus} --seed 13 \
         -x ${params.hisat2_index} \
         -1 sorted.remap.fq1.gz \
         -2 sorted.remap.fq2.gz \

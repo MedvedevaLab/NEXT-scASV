@@ -19,7 +19,7 @@ process REMAP_FASTQ {
         ${r1_fastq} ${r2_fastq}
 
     # Map with HISAT2
-    /mnt/flashgpu/lab2/Allele-specifity/hisat2/hisat2 --very-sensitive -p ${task.cpus} --seed 13 \
+    hisat2 --very-sensitive -p ${task.cpus} --seed 13 \
         --rg-id "ID:${sample_name}" --rg "SM:${sample_id}" \
         -x ${params.hisat2_index} \
         -1 ${sample_name}_R1_trimm.fastq.gz \
