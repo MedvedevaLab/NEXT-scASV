@@ -7,7 +7,7 @@ include { GENERATE_H5_TABLES } from './modules/mapp_bias_and_allele_count/genera
 include { REMAP_BAMFILES } from './modules/mapp_bias_and_allele_count/remap_bam'
 include { COUNT_READS } from './modules/mapp_bias_and_allele_count/count_reads'
 include { RECODE_VCF } from './modules/mapp_bias_and_allele_count/recode_vcf'
-include { CONCAT_AND_SPLIT_VCF } from './modules/mapp_bias_and_allele_count/concat_and_split_vcf'
+include { CONCAT_VCF; VCF_SAMPLE_LIST; SPLIT_VCF } from './modules/mapp_bias_and_allele_count/concat_and_split_vcf'
 
 // Validate required parameters
 def checkRequiredParams() {
@@ -187,11 +187,20 @@ workflow COUNT_READS_WORKFLOW {
             vcf_chrom_combinations.map { vcf_file, csi_file, chrom -> chrom }
         )
         
-        // Concatenate chromosome VCFs and split by sample
-        sample_vcfs = CONCAT_AND_SPLIT_VCF(
-            recoded_vcfs.collect(),
-            file(params.meta_json)
-        )
+        // Concatenate chromosome VCFs
+        concatenated_vcf = CONCAT_VCF(recoded_vcfs.collect())
+
+        // Split VCF by sample using separate Nextflow tasks
+        samples = VCF_SAMPLE_LIST(concatenated_vcf)
+            .splitText()
+            .map { it.trim() }
+            .filter { it }
+
+        split_inputs = samples
+            .combine(concatenated_vcf)
+            .map { sample, vcf -> tuple(vcf, sample) }
+
+        sample_vcfs = SPLIT_VCF(split_inputs)
     
     emit:
         sample_vcfs
