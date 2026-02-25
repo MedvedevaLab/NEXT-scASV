@@ -1,0 +1,4 @@
+.nextflow*
+*.out
+exps/*
+__pycache__/*

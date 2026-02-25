@@ -3,12 +3,12 @@ process REMAP_BAMFILES {
     tag "${sample_name}"
 
     input:
-        tuple val(sample_name), val(pat_id), path(bam), path(bai), path(bed), path(tbi)
+        tuple val(sample_name), val(sample_id), path(bam), path(bai), path(bed), path(tbi)
         path nuclear_chroms
         path h5_files
 
     output:
-        tuple val(sample_name), val(pat_id), path("${sample_name}.bam"), path("${sample_name}.bam.bai"), 
+        tuple val(sample_name), val(sample_id), path("${sample_name}.bam"), path("${sample_name}.bam.bai"), 
               path("${sample_name}.passing.bam"), path("${sample_name}.passing.bam.bai")
 
     script:
@@ -22,7 +22,7 @@ process REMAP_BAMFILES {
         --snp_tab snp_tab.h5 \
         --snp_index snp_index.h5 \
         --haplotype haplotypes.h5 \
-        --samples ${pat_id} \
+        --samples ${sample_id} \
         sorted.bam
 
     hisat2 --very-sensitive -p ${task.cpus} --seed 13 \

@@ -16,26 +16,9 @@ NEXT-scASV (Nextflow pipeline for Allele-Specific Variant calling), a scalable N
     conda activate as_env
     export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
     ```
-  - If `conda activate` is unavailable in your shell:
-    ```bash
-    source ~/miniconda3/etc/profile.d/conda.sh
-    conda activate as_env
-    ```
-  - Create manually (older setup):
-    ```bash
-    conda create -n as_env python==3.10 -y
-    conda activate as_env
-    conda install -y bcftools samtools hdf5 pytables numpy bioconda::sinto bioconda::bedops bioconda::hisat2 -c bioconda -c conda-forge
-    python -m pip install --no-cache-dir pysam mixalime
-    conda install -y -c conda-forge openjdk=17
-    export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
-    ```
-  - Install WASP under `bin/`:
-    ```bash
-    git clone https://github.com/bmvdgeijn/WASP bin/WASP
-    sed -i 's/np.int/int/g' bin/WASP/mapping/snptable.py
-    ```
-  - Nextflow requires Java 17+ (the env installs `openjdk=17`).
+
+  - Follow `https://github.com/bmvdgeijn/WASP` installation (use v0.3.4).
+  - In `WASP/mapping/snptable.py` change `np.int` → `int` (NumPy ≥ 1.20 deprecates `np.int`).
 
 - **Add Nextflow to `bin/`**
   - Download Nextflow and place it in this repo's `bin` folder:
@@ -51,26 +34,58 @@ NEXT-scASV (Nextflow pipeline for Allele-Specific Variant calling), a scalable N
     ```bash
     docker build -t asv-pipeline:latest .
     ```
-  - Quick sanity check:
+  - Run the pipeline inside the container (bind-mount your data/config/output):
     ```bash
-    docker run --rm asv-pipeline:latest nextflow -version
+    docker run --rm -it \
+      -v /path/to/data:/data \
+      -v /path/to/config:/config \
+      -v /path/to/out:/out \
+      asv-pipeline:latest \
+      ./bin/nextflow run /app/main.nf -c /config/nextflow.config
     ```
-  - You can then run Nextflow with Docker enabled via `-with-docker` (the default `nextflow_dev.config` already enables Docker; adjust as needed).
-  - The image sets `JAVA_HOME`, `PATH`, and `NXF_HOME` for non-root runs.
+  - If running inside the container, set `docker.enabled = false` in the config to avoid Docker-in-Docker.
 
-### 2) Pipeline steps (overview)
-
-- **Split** (`split.nf`): barcode-based split of 5′ scRNA FASTQ into per-group files using `bin/split_fastq.py`.
-- **Remap** (`remap.nf`): adapter trimming, HISAT2 alignment, UMI deduplication, and tagged BAM output.
-- **Call** (`call.nf`): variant calling per chromosome (`bcftools` or `cellsnp-lite`) and merge/filtering.
-- **Count reads** (`count_reads.nf`): remapping bias correction (WASP) and allele count tables.
-- **Find ASE** (`find_ase.nf`): MIXALIME modeling and report/plot generation.
-
-### 3) Supplementary files
+### 2) Supplementary files
 
 - Load supplementary annotation/model files from the archive (to be provided later). Place annotation files under `bin/annotation/`.
 
-### 4) Configure `nextflow.config`
+### 2a) Download reference files
+
+Download and prepare the reference resources required by the pipeline. Paths are then set in `nextflow.config` (see Section 3).
+
+- **Reference genome FASTA**
+  - Download the GRCh38 primary assembly FASTA.
+  - Example sources: GENCODE, Ensembl, or UCSC (choose one and stay consistent).
+  - Ensure the FASTA is bgzipped (optional) and indexed with `samtools faidx`.
+
+- **HISAT2 index**
+  - Download a prebuilt HISAT2 index matching the same genome build **or** build it yourself:
+    ```bash
+    hisat2-build /path/to/GRCh38.fa /path/to/hisat2_index/GRCh38
+    ```
+  - Only required when `params.aligner = "hisat2"`.
+
+- **STAR index**
+  - Build a STAR genome index (matching the same genome build):
+    ```bash
+    STAR --runThreadN 8 --runMode genomeGenerate \
+      --genomeDir /path/to/star_index \
+      --genomeFastaFiles /path/to/GRCh38.fa
+    ```
+  - Only required when `params.aligner = "star"`.
+
+- **dbSNP VCF**
+  - Download the dbSNP VCF for the same genome build (e.g., `dbsnp_155.hg38.vcf.gz`).
+  - Make sure it is bgzipped and indexed:
+    ```bash
+    bcftools index -t /path/to/dbsnp.vcf.gz
+    ```
+
+- **Chromosome lists and sizes**
+  - Provide text files with autosomes, nuclear chroms, and chrom sizes as required by the config.
+  - Example: `Genome_no_chr/GRCh38.primary_assembly.genome.chrom_sizes` (already in this repo).
+
+### 3) Configure `nextflow.config`
 
 Modify `nextflow.config` in the project root. Key parameters (see `nextflow_dev.config` for full list and defaults):
 
@@ -86,11 +101,15 @@ Modify `nextflow.config` in the project root. Key parameters (see `nextflow_dev.
 - **References**
   - `params.genome`, `params.ref_genome`: reference FASTA paths (as required by your workflows).
   - `params.hisat2_index`: Prefix to HISAT2 index.
+  - `params.star_index`: STAR genome directory (required if `params.aligner = "star"`).
   - `params.dbsnp`: dbSNP VCF (bgzipped and indexed).
   - `params.autosomes`, `params.nuclear_chroms`, `params.genome_chrom_sizes`: text tables files with chrom lists and sizes (each chrom on the separate line).
 
 - **Workflow toggles**
   - `params.run_split`, `params.run_remap`, `params.run_call`, `params.run_count_reads`, `params.run_find_ase`: set `true/false` to enable steps.
+
+- **Alignment**
+  - `params.aligner`: `'hisat2'` (default) or `'star'`.
 
 - **Calling/Filtering**
   - `params.min_GQ`, `params.min_DP`, `params.min_AD`: genotype quality/depth thresholds.
@@ -114,7 +133,6 @@ Modify `nextflow.config` in the project root. Key parameters (see `nextflow_dev.
 
 ### 5) Run
 
-6
 ```bash
 ./bin/nextflow run main.nf -c nextflow.config
 ```
@@ -126,52 +144,28 @@ Modify `nextflow.config` in the project root. Key parameters (see `nextflow_dev.
 
 Outputs will be created under `params.outdir` with subfolders for each step (e.g., `split/`, `align/`, `count_reads/`, `find_ase/`) and reports in `reports/` if enabled.
 
-### 6) Test data
+### 5) Pipeline steps (toggle on/off)
 
-- Test FASTQ data are in `test_data/`.
-- Use `KR_SGI_B007_L002_5GEX_H076_meta.json` and `KR_SGI_B007_L002_5GEX_H076_split.tsv`.
-- The split table may include a leading numeric index column (as in the provided TSV).
-- A minimal split-only config is available in `tests/nextflow_test.config`.
-  ```bash
-  ./bin/nextflow run main.nf -c tests/nextflow_test.config
-  ```
-  - Outputs will land in `test_out/` by default.
+Use the step flags to run specific stages. For example:
 
-### 7) Full local run (after split)
+```bash
+# 1) Split FASTQ files
+./bin/nextflow run main.nf -c nextflow.config \
+  --run_split true --run_remap false --run_call false --run_count_reads false --run_find_ase false
 
-- Fill in required reference paths in `tests/nextflow_full_local.config`.
-- The following reference files are already included under `test_data/ref/`:
-  - `GRCh38.primary_assembly.genome.chrom_sizes`
-  - `GRCh38.primary_assembly.genome.all.txt` (used as `autosomes`)
-  - `GRCh38.primary_assembly.genome.nuclear.txt`
-- You still need to download:
-  - GRCh38 primary assembly FASTA (use as `genome` and `ref_genome`)
-  - HISAT2 GRCh38 index (set `hisat2_index` to the index prefix)
-  - dbSNP VCF for GRCh38 (bgzipped + indexed; set `dbsnp`)
-- Example download commands:
-  ```bash
-  # GRCh38 FASTA
-  curl -L -o GRCh38.primary_assembly.genome.fa.gz https://ftp.ensembl.org/pub/release-110/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
-  gunzip -f GRCh38.primary_assembly.genome.fa.gz
+# 2) Remap reads
+./bin/nextflow run main.nf -c nextflow.config \
+  --run_split false --run_remap true --run_call false --run_count_reads false --run_find_ase false
 
-  # HISAT2 GRCh38 index (prebuilt)
-  mkdir -p ref/hisat2_grch38
-  curl -L -o ref/hisat2_grch38/grch38_hisat2.tar.gz \
-    https://genome-idx.s3.amazonaws.com/hisat/grch38_hisat2.tar.gz
-  tar -xzf ref/hisat2_grch38/grch38_hisat2.tar.gz -C ref/hisat2_grch38
+# 3) Variant calling
+./bin/nextflow run main.nf -c nextflow.config \
+  --run_split false --run_remap false --run_call true --run_count_reads false --run_find_ase false
 
-  # Or build locally from the FASTA (takes longer)
-  hisat2-build ref/GRCh38.primary_assembly.genome.fa ref/hisat2_grch38/GRCh38
+# 4) Count reads
+./bin/nextflow run main.nf -c nextflow.config \
+  --run_split false --run_remap false --run_call false --run_count_reads true --run_find_ase false
 
-  # dbSNP VCF (GRCh38) + index
-  curl -L -o dbsnp_155_GRCh38.vcf.gz \
-    https://ftp.ncbi.nih.gov/snp/archive/b155/VCF/GCF_000001405.39.gz
-  tabix -f -p vcf dbsnp_155_GRCh38.vcf.gz
-
-  # If you already have 00-common_all.vcf.gz, use it for `dbsnp` instead
-  tabix -f -p vcf 00-common_all.vcf.gz
-  ```
-- Run with:
-  ```bash
-  ./bin/nextflow run main.nf -c tests/nextflow_full_local.config
-  ```
+# 5) Find ASE (includes annotation)
+./bin/nextflow run main.nf -c nextflow.config \
+  --run_split false --run_remap false --run_call false --run_count_reads false --run_find_ase true
+```
