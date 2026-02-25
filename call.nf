@@ -71,7 +71,7 @@ workflow CALL_WORKFLOW {
                         log.warn "Missing BAM file(s) for ${sample_name} (${bam_file})"
                         return null
                     }
-                    
+                    log.info "✓ File exists: ${sample_name}"
                     // Use pat_id downstream
                     tuple(sample_name, pat_id.toString(), bam_file, bai_file)
                 }
@@ -91,9 +91,14 @@ workflow CALL_WORKFLOW {
         }
 
         // Get chromosomes for variant calling
-        chrom_ch = Channel.fromPath(params.autosomes)
-            .splitCsv(header:true, sep:'\t')
-            .map { row -> row.chroms }
+        //chrom_ch = Channel.fromPath(params.autosomes)
+        //    .splitCsv(header:true, sep:'\t')
+        //    .map { row -> row.chroms }
+	chrom_ch = Channel.fromPath(params.autosomes)
+	    .splitText()
+	    .map { line -> line.trim() }
+            .filter { it && !it.startsWith('#') }
+            .view { chrom -> "INPUT_CHROM: ${chrom}" }
 
         // Collect BAM paths (bcftools caller only needs BAMs)
         all_bams = filtered_bams
