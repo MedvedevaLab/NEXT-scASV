@@ -9,27 +9,20 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Create conda environment
-RUN conda env create -f /app/as_env.yml \
-    && conda clean -afy
+RUN conda env create -f /app/as_env.yml
+
+# Ensure tools from the env and repo are on PATH
+ENV PATH="/opt/conda/envs/as_env/bin:/app/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/opt/conda/envs/as_env/lib:${LD_LIBRARY_PATH}"
 
 # Set working directory
 WORKDIR /app
 
-# Install WASP under /app/bin/WASP and apply numpy fix
-RUN git clone https://github.com/bmvdgeijn/WASP /app/bin/WASP \
-    && sed -i 's/np.int/int/g' /app/bin/WASP/mapping/snptable.py
-
-# Install Nextflow into /app/bin
-RUN curl -s https://get.nextflow.io | bash \
-    && mv nextflow /app/bin/nextflow \
-    && chmod +x /app/bin/nextflow
-
-# Make conda env available for runtime commands
-ENV JAVA_HOME="/opt/conda/envs/as_env"
-ENV PATH="/opt/conda/envs/as_env/bin:/app/bin:${PATH}"
-ENV NXF_HOME="/app/.nextflow"
-
-RUN mkdir -p /app/.nextflow
+# Make Nextflow executable and apply WASP compatibility patch if needed
+RUN chmod +x /app/bin/nextflow \
+    && if [ -f /app/bin/WASP/mapping/snptable.py ] && grep -q 'np.int' /app/bin/WASP/mapping/snptable.py; then \
+         sed -i 's/np.int/int/g' /app/bin/WASP/mapping/snptable.py; \
+       fi
 
 # Default command
 CMD ["nextflow", "run", "main.nf", "-c", "nextflow.config", "--help"]

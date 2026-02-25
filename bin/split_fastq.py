@@ -7,7 +7,8 @@ import pandas as pd
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Split FASTQ files based on barcodes')
-    parser.add_argument('--sample_id', required=True, help='Sample ID to process')
+    # Rename: sample_id -> sample (keep --sample_id as backwards-compatible alias)
+    parser.add_argument('--sample', dest='sample', required=False, help='Sample (meta.json key / split_table sample column)')
     parser.add_argument('--group', required=True, help='Group to extract')
     parser.add_argument('--split_table', required=True, help='TSV file with barcode, sample, group columns')
     parser.add_argument('--input_dir', required=True, help='Input directory containing FASTQ files')
@@ -15,14 +16,14 @@ def parse_args():
     parser.add_argument('--outdir', required=True, help='Output directory')
     return parser.parse_args()
 
-def read_split_table(split_table_path, sample_id, group):
+def read_split_table(split_table_path, sample, group):
     """Read split table and filter for specific sample and group"""
     try:
         df = pd.read_csv(split_table_path, sep='\t')
-        filtered_df = df[(df['sample'] == sample_id) & (df['group'] == group)]
+        filtered_df = df[(df['sample'] == sample) & (df['group'] == group)]
         
         if filtered_df.empty:
-            print(f"No barcodes found for sample {sample_id}, group {group}")
+            print(f"No barcodes found for sample {sample}, group {group}")
             return []  # Return empty list instead of exiting
             
         return filtered_df['barcode'].tolist()
@@ -30,7 +31,7 @@ def read_split_table(split_table_path, sample_id, group):
         print(f"Error reading split table: {e}")
         sys.exit(1)
 
-def process_fastq_files(input_dir, file_path, barcodes, sample_id, group, outdir):
+def process_fastq_files(input_dir, file_path, barcodes, sample, group, outdir):
     """Process FASTQ files and split them by barcode"""
     # Full paths to input FASTQ files
     r1_path = os.path.join(input_dir, f"{file_path}.R1.fastq.gz")
@@ -42,7 +43,7 @@ def process_fastq_files(input_dir, file_path, barcodes, sample_id, group, outdir
         sys.exit(1)
     
     # Set up output files
-    output_prefix = f"{sample_id}-{group}"
+    output_prefix = f"{sample}-{group}"
     r1_out_path = os.path.join(outdir, f"{output_prefix}.R1.fastq")
     r2_out_path = os.path.join(outdir, f"{output_prefix}.R2.fastq")
     
@@ -101,7 +102,7 @@ def process_fastq_files(input_dir, file_path, barcodes, sample_id, group, outdir
     if barcode_count == 0:
         os.remove(r1_out_path)
         os.remove(r2_out_path)
-        print(f"No matching reads found for sample {sample_id}, group {group}")
+        print(f"No matching reads found for sample {sample}, group {group}")
         return False
     
     return True
@@ -109,7 +110,7 @@ def process_fastq_files(input_dir, file_path, barcodes, sample_id, group, outdir
 def main():
     args = parse_args()
     
-    print(f"Starting split for sample {args.sample_id}, group {args.group}")
+    print(f"Starting split for sample {args.sample}, group {args.group}")
     print(f"Input dir: {args.input_dir}")
     print(f"File path: {args.file_path}")
     print(f"Output dir: {args.outdir}")
@@ -118,14 +119,14 @@ def main():
     os.makedirs(args.outdir, exist_ok=True)
     
     # Get barcodes for this sample and group
-    barcodes = read_split_table(args.split_table, args.sample_id, args.group)
-    print(f"Found {len(barcodes)} barcodes for sample {args.sample_id}, group {args.group}")
+    barcodes = read_split_table(args.split_table, args.sample, args.group)
+    print(f"Found {len(barcodes)} barcodes for sample {args.sample}, group {args.group}")
     
     if not barcodes:
-        print(f"No barcodes found. Skipping processing for {args.sample_id}, {args.group}")
+        print(f"No barcodes found. Skipping processing for {args.sample}, {args.group}")
         # Write an empty log file to indicate this sample/group was processed but had no data
-        with open(os.path.join(args.outdir, f"{args.sample_id}_{args.group}_split.log"), 'w') as f:
-            f.write(f"No barcodes found for sample {args.sample_id}, group {args.group}\n")
+        with open(os.path.join(args.outdir, f"{args.sample}_{args.group}_split.log"), 'w') as f:
+            f.write(f"No barcodes found for sample {args.sample}, group {args.group}\n")
         sys.exit(0)  # Exit successfully as this is an expected condition
     
     # Process FASTQ files
@@ -133,20 +134,20 @@ def main():
         args.input_dir,
         args.file_path,
         barcodes,
-        args.sample_id,
+        args.sample,
         args.group,
         args.outdir
     )
     
     if not success:
         # Write a log file with the failure info
-        with open(os.path.join(args.outdir, f"{args.sample_id}_{args.group}_split.log"), 'w') as f:
-            f.write(f"Failed to process sample {args.sample_id}, group {args.group}: No matching reads\n")
+        with open(os.path.join(args.outdir, f"{args.sample}_{args.group}_split.log"), 'w') as f:
+            f.write(f"Failed to process sample {args.sample}, group {args.group}: No matching reads\n")
         sys.exit(0)  # Exit successfully to avoid pipeline failure
     else:
         # Write a success log file
-        with open(os.path.join(args.outdir, f"{args.sample_id}_{args.group}_split.log"), 'w') as f:
-            f.write(f"Successfully processed sample {args.sample_id}, group {args.group}\n")
+        with open(os.path.join(args.outdir, f"{args.sample}_{args.group}_split.log"), 'w') as f:
+            f.write(f"Successfully processed sample {args.sample}, group {args.group}\n")
 
 if __name__ == "__main__":
     main()

@@ -37,7 +37,7 @@ class MetaParser:
     def parse_meta_json(meta_json_path: str) -> Dict:
         """
         Parse meta.json file and return the parsed JSON object.
-        Note: we normalize group names by replacing '-' with '_' (pipeline uses '-' as a sample_id/group separator).
+        Note: we normalize group names by replacing '-' with '_' (pipeline uses '-' as a sample/group separator).
         
         Args:
             meta_json_path: Path to the meta.json file
@@ -47,12 +47,12 @@ class MetaParser:
         """
         with open(meta_json_path, 'r') as f:
             metadata = json.load(f)
-            for sample_id in metadata.keys():
-                metadata[sample_id]['groups'] = [group.replace('-', '_') for group in metadata[sample_id]['groups']]
-                # pat_id must be present in meta.json (do not derive at runtime)
-                if 'pat_id' not in metadata[sample_id] or not metadata[sample_id]['pat_id']:
+            for sample in metadata.keys():
+                metadata[sample]['groups'] = [group.replace('-', '_') for group in metadata[sample]['groups']]
+                # pat_id must be present in meta.json (renamed to sample_id in pipeline variables; do not derive at runtime)
+                if 'pat_id' not in metadata[sample] or not metadata[sample]['pat_id']:
                     raise ValueError(
-                        f"Missing required field 'pat_id' for sample_id='{sample_id}' in meta.json. "
+                        f"Missing required field 'pat_id' for sample='{sample}' in meta.json. "
                         f"Please add it to meta.json (e.g. pat_id='H026') or run: "
                         f"python3 bin/meta_parser.py add_pat_id_to_meta_json <in_meta.json> <out_meta.json>"
                     )
@@ -80,15 +80,15 @@ class MetaParser:
             metadata: Parsed meta.json object
             
         Returns:
-            List of entries with sample_id and group information
+            List of entries with sample (meta.json key), sample_id (patient ID), and group information
         """
         entries = []
-        for sample_id, sample_info in metadata.items():
-            pat_id = sample_info['pat_id']
+        for sample, sample_info in metadata.items():
+            sample_id = sample_info['pat_id']
             for group in sample_info['groups']:
                 entries.append({
+                    'sample': sample,
                     'sample_id': sample_id,
-                    'pat_id': pat_id,
                     'group': group
                 })
         return entries
@@ -106,18 +106,18 @@ class MetaParser:
         return metadata
 
     @staticmethod
-    def create_sample_name(sample_id: str, group: str) -> str:
+    def create_sample_name(sample: str, group: str) -> str:
         """
-        Create sample name from sample_id and group
+        Create sample name from sample and group
         
         Args:
-            sample_id: Sample ID
+            sample: Sample (meta.json key / split_table sample column)
             group: Group name
             
         Returns:
             Formatted sample name
         """
-        return f"{sample_id}-{group}"
+        return f"{sample}-{group}"
 
     @staticmethod
     def create_bam_entries(
@@ -134,12 +134,13 @@ class MetaParser:
             suffix: Suffix to append to sample name for BAM file
             
         Returns:
-            List of BAM entries with sample information
+            List of BAM entries with sample information.
         """
         bam_entries = []
-        for sample_id, sample_info in metadata.items():
+        for sample, sample_info in metadata.items():
+            sample_id = sample_info["pat_id"]
             for group in sample_info['groups']:
-                sample_name = MetaParser.create_sample_name(sample_id, group)
+                sample_name = MetaParser.create_sample_name(sample, group)
                 bam_path = Path(bam_dir) / f"{sample_name}{suffix}"
                 bai_path = Path(str(bam_path) + '.bai')
                 
@@ -159,7 +160,8 @@ class MetaParser:
         metadata: Dict,
         bam_dir: str,
         bed_dir: str,
-        suffix: str = "_marked_filtered.bam"
+        suffix: str = "_marked_filtered.bam",
+        bed_key: str = "sample_id"
     ) -> List[Tuple[str, str, str, str, str, str]]:
         """
         Create BAM entries with BED files from metadata
@@ -174,14 +176,19 @@ class MetaParser:
             List of entries with sample information and associated files
         """
         entries = []
-        for sample_id, sample_info in metadata.items():
-            pat_id = sample_info["pat_id"]
+        for sample, sample_info in metadata.items():
+            sample_id = sample_info["pat_id"]
             for group in sample_info['groups']:
-                sample_name = MetaParser.create_sample_name(sample_id, group)
+                sample_name = MetaParser.create_sample_name(sample, group)
                 bam_path = Path(bam_dir) / f"{sample_name}{suffix}"
                 bai_path = Path(str(bam_path) + '.bai')
-                # BEDs are produced by CALL stage as <pat_id>.bed.gz
-                bed_path = Path(bed_dir) / f"{pat_id}.bed.gz"
+                if bed_key == "sample_name":
+                    bed_id = sample_name
+                else:
+                    bed_id = sample_id
+
+                # BEDs are produced by CALL stage as <id>.bed.gz where id is caller-dependent.
+                bed_path = Path(bed_dir) / f"{bed_id}.bed.gz"
                 tbi_path = Path(str(bed_path) + '.tbi')
                 
                 if not bam_path.exists():
@@ -193,15 +200,19 @@ class MetaParser:
                     continue
 
                 if not bed_path.exists() or not tbi_path.exists():
-                    print(f"WARNING: BED or TBI file not found for pat_id={pat_id} (sample_id={sample_id}): {bed_path}", file=sys.stderr)
+                    print(
+                        f"WARNING: BED or TBI file not found for bed_key={bed_key}, "
+                        f"sample_id={sample_id} (sample={sample}): {bed_path}",
+                        file=sys.stderr
+                    )
                     continue
                 
-                # Use pat_id as the key downstream (WASP uses --samples <pat_id>, CALL uses pat_id in VCF samples)
-                entries.append([sample_name, pat_id, str(bam_path), str(bai_path), str(bed_path), str(tbi_path)])
+                # Keep patient sample_id as the key for WASP downstream; only BED id is caller-dependent.
+                entries.append([sample_name, sample_id, str(bam_path), str(bai_path), str(bed_path), str(tbi_path)])
         return entries
 
     @staticmethod
-    def create_sample_map_entries(metadata: Dict) -> List[Tuple[str, str, str]]:
+    def create_sample_map_entries(metadata: Dict, genotype_key: str = "sample_id") -> List[Tuple[str, str, str]]:
         """
         Create sample map entries for recode_vcf process from metadata
         
@@ -212,13 +223,14 @@ class MetaParser:
             List of sample map entries with sample_name, sample_id, and expected counts file name
         """
         entries = []
-        for sample_id, sample_info in metadata.items():
-            pat_id = sample_info["pat_id"]
+        for sample, sample_info in metadata.items():
+            sample_id = sample_info["pat_id"]
             for group in sample_info['groups']:
-                sample_name = MetaParser.create_sample_name(sample_id, group)
+                sample_name = MetaParser.create_sample_name(sample, group)
                 counts_file_name = f"{sample_name}.counts.bed.gz"
-                # Map each group-level sample_name to the corresponding genotype sample in the VCF (pat_id)
-                entries.append([sample_name, pat_id, counts_file_name])
+                genotype_id = sample_name if genotype_key == "sample_name" else sample_id
+                # Map each group-level sample_name to the corresponding genotype sample in the VCF.
+                entries.append([sample_name, genotype_id, counts_file_name])
         return entries
 
     @staticmethod
@@ -295,10 +307,12 @@ def main():
             print("Usage: meta_parser.py parse_meta_json <meta_json_path>", file=sys.stderr)
             sys.exit(1)
         metadata = MetaParser.parse_meta_json(sys.argv[2])
-        try:
-            print(json.dumps(metadata, indent=None, separators=(',', ':')))
-        except BrokenPipeError:
-            pass
+        print(json.dumps(metadata, indent=None, separators=(',', ':')))
+
+        # try:
+        #     print(json.dumps(metadata, indent=None, separators=(',', ':')))
+        # except BrokenPipeError:
+        #     pass
         
     elif command == "get_sample_ids":
         if len(sys.argv) != 3:
@@ -317,7 +331,7 @@ def main():
         # Output each entry on a new line for Nextflow to process
         try:
             for entry in entries:
-                print(f"{entry['sample_id']}\t{entry['pat_id']}\t{entry['group']}")
+                print(f"{entry['sample']}\t{entry['sample_id']}\t{entry['group']}")
         except BrokenPipeError:
             # Allow piping to tools like `head` without a noisy stacktrace
             pass
@@ -336,7 +350,7 @@ def main():
         
     elif command == "create_sample_name":
         if len(sys.argv) != 4:
-            print("Usage: meta_parser.py create_sample_name <sample_id> <group>", file=sys.stderr)
+            print("Usage: meta_parser.py create_sample_name <sample> <group>", file=sys.stderr)
             sys.exit(1)
         sample_name = MetaParser.create_sample_name(sys.argv[2], sys.argv[3])
         print(sample_name)
@@ -352,20 +366,40 @@ def main():
             print("\t".join(entry))
         
     elif command == "create_bam_bed_entries":
-        if len(sys.argv) != 5:
-            print("Usage: meta_parser.py create_bam_bed_entries <meta_json_path> <bam_dir> <bed_dir>", file=sys.stderr)
+        if len(sys.argv) not in (5, 6):
+            print(
+                "Usage: meta_parser.py create_bam_bed_entries <meta_json_path> <bam_dir> <bed_dir> [bed_key: sample_id|sample_name]",
+                file=sys.stderr
+            )
             sys.exit(1)
         metadata = MetaParser.parse_meta_json(sys.argv[2])
-        entries = MetaParser.create_bam_bed_entries(metadata, sys.argv[3], sys.argv[4])
+        bed_key = sys.argv[5] if len(sys.argv) == 6 else "sample_id"
+        # Backwards-compat: accept legacy 'pat_id'
+        if bed_key == "pat_id":
+            bed_key = "sample_id"
+        if bed_key not in ("sample_id", "sample_name"):
+            print(f"Invalid bed_key: {bed_key}. Use sample_id or sample_name.", file=sys.stderr)
+            sys.exit(1)
+        entries = MetaParser.create_bam_bed_entries(metadata, sys.argv[3], sys.argv[4], bed_key=bed_key)
         # Output as JSON for NextFlow to parse
         print(json.dumps(entries, indent=None, separators=(',', ':')))
         
     elif command == "create_sample_map_entries":
-        if len(sys.argv) != 3:
-            print("Usage: meta_parser.py create_sample_map_entries <meta_json_path>", file=sys.stderr)
+        if len(sys.argv) not in (3, 4):
+            print(
+                "Usage: meta_parser.py create_sample_map_entries <meta_json_path> [genotype_key: sample_id|sample_name]",
+                file=sys.stderr
+            )
             sys.exit(1)
         metadata = MetaParser.parse_meta_json(sys.argv[2])
-        entries = MetaParser.create_sample_map_entries(metadata)
+        genotype_key = sys.argv[3] if len(sys.argv) == 4 else "sample_id"
+        # Backwards-compat: accept legacy 'pat_id'
+        if genotype_key == "pat_id":
+            genotype_key = "sample_id"
+        if genotype_key not in ("sample_id", "sample_name"):
+            print(f"Invalid genotype_key: {genotype_key}. Use sample_id or sample_name.", file=sys.stderr)
+            sys.exit(1)
+        entries = MetaParser.create_sample_map_entries(metadata, genotype_key=genotype_key)
         # Output each entry on a new line with tab separation
         for entry in entries:
             print("\t".join(entry))

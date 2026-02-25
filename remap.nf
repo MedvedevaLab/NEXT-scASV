@@ -43,8 +43,8 @@ workflow REMAP_WORKFLOW {
                     return output
                 }
                 .splitCsv(sep: '\t', header: false)
-                .map { sample_id, pat_id, group ->
-                    def cmd = "python3 ${projectDir}/bin/meta_parser.py create_sample_name '${sample_id}' '${group}'"
+                .map { sample, sample_id, group ->
+                    def cmd = "python3 ${projectDir}/bin/meta_parser.py create_sample_name '${sample}' '${group}'"
                     def sample_name = cmd.execute().text.trim().replaceAll("'", '')
                     def r1_file = file("${input_source}/${sample_name}.R1.fastq")
                     def r2_file = file("${input_source}/${sample_name}.R2.fastq")
@@ -56,8 +56,7 @@ workflow REMAP_WORKFLOW {
                         return null
                     }
                     
-                    // Use pat_id downstream as the key (CALL/COUNT_READS expect pat_id)
-                    [sample_name, pat_id, r1_file, r2_file, remap_out_path]
+                    [sample_name, sample_id, r1_file, r2_file, remap_out_path]
                 }
                 .filter { it != null }
                 .set { remap_ch }
@@ -67,9 +66,10 @@ workflow REMAP_WORKFLOW {
             log.info "Running REMAP_WORKFLOW in chained mode with input channel"
             
             input_source
-                .map { sample_name, sample_id, group, r1_fastq, r2_fastq ->
+                // SPLIT_WORKFLOW emits: [sample_name, sample, sample_id, group, r1_fastq, r2_fastq]
+                .map { sample_name, sample, sample_id, group, r1_fastq, r2_fastq ->
                     def remap_out_path = "${output_dir}"
-                    // Chained mode must pass pat_id as sample_id (2nd element) to stay consistent
+                    // 2nd element must be sample_id (patient) (used as SM tag and as join key downstream)
                     [sample_name, sample_id, r1_fastq, r2_fastq, remap_out_path]
                 }
                 .set { remap_ch }
@@ -83,11 +83,12 @@ workflow REMAP_WORKFLOW {
         Channel
             .fromPath(params.meta_json)
             .map { meta_file ->
-                def cmd = "python3 ${projectDir}/bin/meta_parser.py create_bam_entries ${meta_file}"
+                def cmd = "python3 ${projectDir}/bin/meta_parser.py create_bam_entries ${meta_file} ${output_dir}"
                 def output = cmd.execute().text
                 return output
             }
             .splitCsv(sep: '\t', header: false)
+            // meta_parser create_bam_entries: [sample_name, sample_id, bam_path, bai_path]
             .map { sample_name, sample_id, bam_path, bai_path ->
                 def bam_file = file(bam_path)
                 def bai_file = file(bai_path)

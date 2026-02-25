@@ -60,8 +60,8 @@ workflow CALL_WORKFLOW {
                     return output
                 }
                 .splitCsv(sep: '\t', header: false)
-                .map { sample_id, pat_id, group ->
-                    def cmd = "python3 ${projectDir}/bin/meta_parser.py create_sample_name '${sample_id}' '${group}'"
+                .map { sample, sample_id, group ->
+                    def cmd = "python3 ${projectDir}/bin/meta_parser.py create_sample_name '${sample}' '${group}'"
                     def sample_name = cmd.execute().text.trim().replaceAll("'", '')
                     def bam_file = file("${input_source}/${sample_name}_marked_filtered.bam")
                     def bai_file = file("${input_source}/${sample_name}_marked_filtered.bam.bai")
@@ -71,9 +71,8 @@ workflow CALL_WORKFLOW {
                         log.warn "Missing BAM file(s) for ${sample_name} (${bam_file})"
                         return null
                     }
-                    log.info "✓ File exists: ${sample_name}"
-                    // Use pat_id downstream
-                    tuple(sample_name, pat_id.toString(), bam_file, bai_file)
+                    
+                    tuple(sample_name, sample_id.toString(), bam_file, bai_file)
                 }
                 .filter { it != null }
                 .set { filtered_bams }
@@ -84,25 +83,31 @@ workflow CALL_WORKFLOW {
             
             input_source
                 .map { sample_name, sample_id, bam_file, bai_file ->
-                    // Chained mode must provide pat_id as the 2nd element
+                    // Chained mode must provide patient sample_id as the 2nd element
                     tuple(sample_name, sample_id.toString(), bam_file, bai_file)
                 }
                 .set { filtered_bams }
         }
 
         // Get chromosomes for variant calling
-        //chrom_ch = Channel.fromPath(params.autosomes)
-        //    .splitCsv(header:true, sep:'\t')
-        //    .map { row -> row.chroms }
-	chrom_ch = Channel.fromPath(params.autosomes)
-	    .splitText()
-	    .map { line -> line.trim() }
+        // chrom_ch = Channel.fromPath(params.autosomes)
+        //     .splitCsv(header:true, sep:'\t')
+        //     .map { row -> row.chroms }
+        chrom_ch = Channel.fromPath(params.autosomes)
+            .splitText()
+            .map { line -> line.trim() }
             .filter { it && !it.startsWith('#') }
+            // Support both plain one-column files and TSV with header; keep only real chromosome names.
+            .map { line -> line.tokenize('\t')[0].trim() }
+            .filter { chrom ->
+                def lc = chrom.toLowerCase()
+                chrom && lc != 'chrom' && lc != 'chroms'
+            }
             .view { chrom -> "INPUT_CHROM: ${chrom}" }
 
         // Collect BAM paths (bcftools caller only needs BAMs)
         all_bams = filtered_bams
-            .map { sample_name, pat_id, bam, bai -> bam }
+            .map { sample_name, sample_id, bam, bai -> bam }
             .collect()
 
         // Early sanity check: make failures actionable (e.g. if something like 'R' sneaks in)
@@ -121,13 +126,19 @@ workflow CALL_WORKFLOW {
         if (params.variant_caller == 'cellsnp') {
             log.info "Calling variants with cellsnp-lite (Mode 2b) per chromosome"
 
-            // For cellsnp-lite (-S/-i), we must keep BAMs and sample IDs in the exact same order.
+            // For scRNA use one BAM per sample_name (no pre-merge by sample_id) to preserve resolution.
+            // For cellsnp-lite (-S/-i), keep BAMs and sample IDs in exactly the same order.
             bam_id_pairs = filtered_bams
-                .map { sample_name, pat_id, bam, bai -> tuple(pat_id.toString(), bam) }
-                .collect()
+                .map { sample_name, sample_id, bam, bai -> tuple(sample_name.toString(), bam) }
+                .collect(flat: false)
 
             sorted_bam_id_pairs = bam_id_pairs
                 .map { pairs ->
+                    def malformed = pairs.findAll { p ->
+                        !(p instanceof List) || p.size() != 2
+                    }
+                    if( malformed && malformed.size() > 0 )
+                        error "CALL_WORKFLOW expected [sample_name, bam] pairs for cellsnp-lite, but got malformed values: ${malformed.take(10)}"
                     return pairs.toList().sort { a, b -> a[0].toString() <=> b[0].toString() }
                 }
 
@@ -162,9 +173,18 @@ workflow CALL_WORKFLOW {
         merged_variants = MERGE_VARIANTS(variants_to_merge)
 
         // Prepare input for FILTER_VARIANTS
-        sample_ids = filtered_bams
-            .map { sample_name, pat_id, bam, bai -> pat_id.toString() }
-            .unique()
+        sample_ids = (params.variant_caller == 'cellsnp'
+            ? merged_variants
+                .map { snps_vcf, snps_csi ->
+                    def output = "bcftools query -l ${snps_vcf}".execute().text
+                    output.readLines()
+                        .collect { it.trim().replaceAll(/^[\[\s'"]+/, '').replaceAll(/[,\]\s'"]+$/, '') }
+                        .findAll { it }
+                }
+                .flatten()
+                .unique()
+            : filtered_bams.map { sample_name, sample_id, bam, bai -> sample_id.toString() }
+                .unique())
 
         filter_input = sample_ids
             .combine(merged_variants)
