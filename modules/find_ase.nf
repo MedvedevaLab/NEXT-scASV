@@ -19,10 +19,28 @@ process FIT_ASE_MODEL {
     
     script:
     """    
-    # Create a file list of all VCF files
-    printf '%s\n' ${input_files} > tmp_input_files.tsv
+    # Create a file list of all VCF files (escape \\n to avoid Groovy newline interpolation)
+    printf '%s\\n' ${input_files} > tmp_input_files.tsv
+    if [[ ! -s tmp_input_files.tsv ]]; then
+        echo "ERROR: tmp_input_files.tsv is empty; no VCF files were provided to FIT_ASE_MODEL" >&2
+        exit 1
+    fi
     echo "all vcf model"
     cat tmp_input_files.tsv
+
+    # Keep only non-empty VCF files; mixalime fit fails on empty datasets.
+    : > tmp_input_nonempty.tsv
+    while IFS= read -r vcf_file; do
+        if zcat "\${vcf_file}" | awk 'BEGIN{ok=1} /^#/ {next} {ok=0; exit 0} END{exit ok}'; then
+            echo "\${vcf_file}" >> tmp_input_nonempty.tsv
+        fi
+    done < tmp_input_files.tsv
+    mv tmp_input_nonempty.tsv tmp_input_files.tsv
+    if [[ ! -s tmp_input_files.tsv ]]; then
+        echo "ERROR: all input VCF files are empty after per-sample filtering." >&2
+        exit 1
+    fi
+    mapfile -t INPUT_VCFS < tmp_input_files.tsv
     
     mixalime create "${project_name}" "tmp_input_files.tsv"
     echo "Project created"
@@ -47,14 +65,18 @@ process FIT_ASE_MODEL {
         echo "Processing group: \$group_id"
         
         # Filter VCF files for this group
-        python3 ${projectDir}/bin/meta_parser.py filter_vcf_files_by_group ${params.meta_json} \$group_id ${input_files} > \${group_id}_tmp_input.tsv
+        python3 ${projectDir}/bin/meta_parser.py filter_vcf_files_by_group ${params.meta_json} \$group_id "\${INPUT_VCFS[@]}" > \${group_id}_tmp_input.tsv
         
         echo "Filtered VCF files for group \$group_id:"
         cat \${group_id}_tmp_input.tsv
         
-        # Run combine for this group
-        mixalime combine --subname \$group_id -g \${group_id}_tmp_input.tsv "${project_name}"
-        echo "Group \$group_id combined"
+        # Run combine only when group has at least one non-empty VCF
+        if [[ -s \${group_id}_tmp_input.tsv ]]; then
+            mixalime combine --subname \$group_id -g \${group_id}_tmp_input.tsv "${project_name}"
+            echo "Group \$group_id combined"
+        else
+            echo "Skipping group \$group_id: no matching non-empty VCF files"
+        fi
         
         # Clean up group-specific temp file
         rm \${group_id}_tmp_input.tsv
