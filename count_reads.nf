@@ -167,10 +167,10 @@ workflow COUNT_READS_WORKFLOW {
             .flatten()
             .collect()
 
-
-        chrom_ch = Channel.fromPath(params.autosomes)
-            .splitCsv(header:true, sep:'\t')
-            .map { row -> row.chroms }
+	chrom_ch = Channel.fromPath(params.autosomes)
+            .splitText()
+            .map { line -> line.trim() }
+            .filter { it && !it.startsWith('#') }
         
         // Recode VCF - combine VCF with each chromosome to create 22 processes
         vcf_chrom_combinations = genotype_channel
