@@ -11,17 +11,25 @@ RUN apt-get update \
 # Create conda environment
 RUN conda env create -f /app/as_env.yml
 
-# Ensure tools from the env and repo are on PATH
-ENV PATH="/opt/conda/envs/as_env/bin:/app/bin:${PATH}"
-ENV LD_LIBRARY_PATH="/opt/conda/envs/as_env/lib:${LD_LIBRARY_PATH}"
+# Ensure env works and is used by default (even in bash -lc)
+RUN /opt/conda/envs/as_env/bin/python -c "import numpy, pandas, scipy, pysam; print('as_env imports: OK')"
+ENV CONDA_AUTO_ACTIVATE_BASE=false
+ENV PATH="/opt/conda/envs/as_env/bin:/app/bin:/opt/conda/bin:${PATH}"
+RUN printf '%s\n' \
+      'source /opt/conda/etc/profile.d/conda.sh' \
+      'conda activate as_env' \
+    > /etc/profile.d/activate-as_env.sh \
+    && ln -sf /opt/conda/envs/as_env/bin/python /usr/local/bin/python \
+    && ln -sf /opt/conda/envs/as_env/bin/pip /usr/local/bin/pip
 
 # Download Nextflow into /app/bin (optionally pin version at build time)
 ARG NEXTFLOW_VERSION=""
 RUN mkdir -p /app/bin \
     && if [ -n "${NEXTFLOW_VERSION}" ]; then export NXF_VER="${NEXTFLOW_VERSION}"; fi \
-    && curl -fsSL https://get.nextflow.io | bash \
+    && LD_LIBRARY_PATH="" /usr/bin/curl -fsSL https://get.nextflow.io | /bin/bash \
     && mv nextflow /app/bin/nextflow \
-    && chmod +x /app/bin/nextflow
+    && chmod +x /app/bin/nextflow \
+    && ln -sf /app/bin/nextflow /usr/local/bin/nextflow
 
 # Download WASP into /app/bin/WASP (pin default tag; override at build time)
 ARG WASP_VERSION="v0.3.4"
@@ -42,4 +50,5 @@ RUN if [ -f /app/bin/WASP/mapping/snptable.py ] && grep -q 'np.int' /app/bin/WAS
        fi
 
 # Default command
+ENTRYPOINT ["conda", "run", "--no-capture-output", "-n", "as_env"]
 CMD ["nextflow", "run", "main.nf", "-c", "nextflow.config", "--help"]
